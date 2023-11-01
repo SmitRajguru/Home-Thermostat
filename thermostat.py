@@ -117,7 +117,7 @@ class Device:
             if self.value > self.setpoint + 2 * self.triggerBuffer:
                 if time.time() - self.msgTime > self.msgDelay:
                     self.SendMessage(
-                        f"{self.name} is above setpoint by {self.setpoint - self.value}. Check if the device is working properly."
+                        f"{self.name} is above setpoint by {self.value - self.setpoint}. Check if the device is working properly."
                     )
                     self.msgTime = time.time()
 
@@ -172,6 +172,8 @@ class Thermostat:
     def updateLoop(self):
         while True:
             try:
+                if time.time() - self.msgTime > self.msgDelay:
+                    self.sendTelegramMessage("Thermostat is Down.")
                 if (
                     self.isUpdate
                     or int(float(self.getFeedValue(self.updateTriggerKey))) != 0
@@ -183,9 +185,7 @@ class Thermostat:
                     print(f"/" * 20)
                     self.isUpdate = False
                     self.AIO.send_data(self.updateTriggerKey, 0)
-                if time.time() - self.msgTime > self.msgDelay:
-                    self.sendTelegramMessage("Thermostat is Down.")
-                self.msgTime = time.time()
+                    self.msgTime = time.time()
             except Exception as e:
                 print(f"Exception in updateLoop : {e}")
                 self.sendTelegramMessage(f"Exception in updateLoop : {e}")
