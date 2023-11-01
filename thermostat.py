@@ -3,12 +3,19 @@
 # import libraries
 from Adafruit_IO import Client, Feed, RequestError
 from flask import Flask, request
-import requests
+import urllib, requests
 import time
 import threading
+from enum import Enum
+import os
 
-
+# create flask app
 app = Flask(__name__)
+
+# define the secrets
+secretKeys = Enum(
+    "secretKeys", ["AIO_Username", "AIO_Key", "Telegram_Bot_Token", "Telegram_Chat_ID"]
+)
 
 
 class Device:
@@ -36,13 +43,13 @@ class Device:
         self.triggerBuffer = 0
         self.triggerBufferKey = triggerBufferKey
 
-        self.valueFeed = None
-        self.setpointFeed = None
-        self.triggerBufferFeed = None
-
         self.isInvertedControl = isInvertedControl
 
         self.AIO = None
+        self.SendMessage = None
+
+        self.msgTime = 0
+        self.msgDelay = 60 * 60  # 2 hours
 
         self.update()
 
@@ -52,9 +59,6 @@ class Device:
 
             # send request to turn on
             print(f"Turning on {self.name}")
-            # response = request.urlopen(self.triggerOnURL)
-            # print(f"Response from {self.name} : {response.read()}")
-            # response.close()
 
             x = requests.get(self.triggerOnURL)
             print(f"Response from {self.name} : {x.status_code} -> {x.text}")
@@ -65,19 +69,18 @@ class Device:
 
             # send request to turn off
             print(f"Turning off {self.name}")
-            # response = request.urlopen(self.triggerOffURL)
-            # print(f"Response from {self.name} : {response.read()}")
-            # response.close()
 
             x = requests.get(self.triggerOffURL)
             print(f"Response from {self.name} : {x.status_code} -> {x.text}")
 
-    def setAIO(self, AIO):
+    def setup(self, AIO, sendMessage):
         self.AIO = AIO
-        # self.valueFeed = self.AIO.feeds(key=self.valueKey)
-        # self.setpointFeed = self.AIO.feeds(key=self.setpointKey)
-        # self.triggerBufferFeed = self.AIO.feeds(key=self.triggerBufferKey)
+        self.SendMessage = sendMessage
+
         print(f"Setup for {self.name} complete")
+
+        self.state = True
+        self.turnOff()
 
     def update(self):
         if (
@@ -100,25 +103,40 @@ class Device:
                 self.turnOn()
             elif self.value > self.setpoint + self.triggerBuffer:
                 self.turnOff()
+            if self.value < self.setpoint - 2 * self.triggerBuffer:
+                if time.time() - self.msgTime > self.msgDelay:
+                    self.SendMessage(
+                        f"{self.name} is below setpoint by {self.value - self.setpoint}. Check if the device is working properly."
+                    )
+                    self.msgTime = time.time()
         else:
             if self.value > self.setpoint + self.triggerBuffer:
                 self.turnOn()
             elif self.value < self.setpoint - self.triggerBuffer:
                 self.turnOff()
+            if self.value > self.setpoint + 2 * self.triggerBuffer:
+                if time.time() - self.msgTime > self.msgDelay:
+                    self.SendMessage(
+                        f"{self.name} is above setpoint by {self.setpoint - self.value}. Check if the device is working properly."
+                    )
+                    self.msgTime = time.time()
 
         self.status()
 
     def status(self):
         print(
-            f"{self.name} : state -> {self.state} | value -> {self.value} | setpoint -> {self.setpoint} | triggerBuffer -> {self.triggerBuffer}"
+            f"{self.name} : state -> {self.state} | value -> {self.value} | setpoint -> {self.setpoint} | triggerBuffer -> {self.triggerBuffer} | isInvertedControl -> {self.isInvertedControl} | msgTime -> {time.time() - self.msgTime}"
         )
 
 
 class Thermostat:
-    def __init__(self):
-        self.AIO_USERNAME = "rajgurusmit"
-        self.AIO_KEY = "aio_VjCu139amxdxAYl4Pa50SdyKzFiQ"
+    def __init__(self, params):
+        self.AIO_USERNAME = params[secretKeys.AIO_Username.name]
+        self.AIO_KEY = params[secretKeys.AIO_Key.name]
         self.AIO = Client(self.AIO_USERNAME, self.AIO_KEY)
+
+        self.Telegram_Bot_Token = params[secretKeys.Telegram_Bot_Token.name]
+        self.Telegram_Chat_ID = params[secretKeys.Telegram_Chat_ID.name]
 
         self.feeds = self.AIO.feeds()
         for f in self.feeds:
@@ -128,6 +146,9 @@ class Thermostat:
         self.isUpdate = True
         self.updateTriggerKey = "thermostat.update-trigger"
 
+        self.msgTime = time.time()
+        self.msgDelay = 60 * 5  # 5 minutes
+
         self.updateThread = threading.Thread(target=self.updateLoop, daemon=True)
 
     def run(self):
@@ -136,32 +157,38 @@ class Thermostat:
     def addDevice(self, device):
         self.devices.append(device)
 
+    def sendTelegramMessage(self, message):
+        url = f"https://api.telegram.org/bot{self.Telegram_Bot_Token}/sendMessage?chat_id={self.Telegram_Chat_ID}&text={message}"
+        x = requests.get(url)
+        print(f"Response from Telegram : {x.status_code} -> {x.text}")
+
     def getFeedValue(self, key):
         for feed in self.feeds:
-            # print(f"Feed -> {feed} with key -> {key}")
             if feed.key == key:
                 val = self.AIO.receive(feed.key).value
-                # print(f"Feed -> {key} has value -> {val}")
                 return val
         return None
 
     def updateLoop(self):
         while True:
-            if (
-                self.isUpdate
-                or int(float(self.getFeedValue(self.updateTriggerKey))) != 0
-            ):
-                print(f"*" * 20)
-                print(f"Updating Thermostat")
-                for device in self.devices:
-                    # value = self.getFeedValue(device.valueKey)
-                    # setpoint = self.getFeedValue(device.setpointKey)
-                    # triggerBuffer = self.getFeedValue(device.triggerBufferKey)
-                    # device.update(value, setpoint, triggerBuffer)
-                    device.update()
-                print(f"/" * 20)
-                self.isUpdate = False
-                self.AIO.send_data(self.updateTriggerKey, 0)
+            try:
+                if (
+                    self.isUpdate
+                    or int(float(self.getFeedValue(self.updateTriggerKey))) != 0
+                ):
+                    print(f"*" * 20)
+                    print(f"Updating Thermostat")
+                    for device in self.devices:
+                        device.update()
+                    print(f"/" * 20)
+                    self.isUpdate = False
+                    self.AIO.send_data(self.updateTriggerKey, 0)
+                if time.time() - self.msgTime > self.msgDelay:
+                    self.sendTelegramMessage("Thermostat is Down.")
+                self.msgTime = time.time()
+            except Exception as e:
+                print(f"Exception in updateLoop : {e}")
+                self.sendTelegramMessage(f"Exception in updateLoop : {e}")
             time.sleep(10)
 
     def status(self):
@@ -181,6 +208,11 @@ class Thermostat:
             json[device.name]["setpoint"] = device.setpoint
             json[device.name]["triggerBuffer"] = device.triggerBuffer
             json[device.name]["isInvertedControl"] = device.isInvertedControl
+            json[device.name]["msgTime"] = device.msgTime
+            json[device.name]["msgDelay"] = device.msgDelay
+            json[device.name]["timeSinceMsg"] = time.time() - device.msgTime
+            json[device.name]["triggerOnURL"] = device.triggerOnURL
+            json[device.name]["triggerOffURL"] = device.triggerOffURL
         return json
 
 
@@ -199,8 +231,43 @@ def index():
 
 
 if __name__ == "__main__":
+    # ****************************************************
     print(f"Starting Thermostat - __main__")
-    thermostat = Thermostat()
+
+    # ****************************************************
+    # load the secrets from a file
+    # get all files in the current directory tree
+    file_lines = []
+    for root, dirs, files in os.walk("."):
+        for file in files:
+            if file.endswith("SECRETS.h"):
+                with open(os.path.join(root, file), "r") as f:
+                    file_lines.extend(f.readlines())
+
+    print(f"Secrets file found : {file_lines}")
+
+    # parse the file for the secrets
+    params = {}
+    for line in file_lines:
+        splits = line.split(" ")
+        if len(splits) < 3:
+            continue
+        define = splits[0]
+        key = splits[1]
+        value = splits[2]
+        if define == "#define":
+            if key == "IO_USERNAME":
+                params[secretKeys.AIO_Username.name] = value.strip()[1:-1]
+            elif key == "IO_KEY":
+                params[secretKeys.AIO_Key.name] = value.strip()[1:-1]
+            elif key == "Telegram_automation_bot_token":
+                params[secretKeys.Telegram_Bot_Token.name] = value.strip()[1:-1]
+            elif key == "Telegram_automation_chat_id":
+                params[secretKeys.Telegram_Chat_ID.name] = int(value.strip()[1:-1])
+
+    print(f"Secrets parsed : {params}")
+
+    thermostat = Thermostat(params)
 
     # ****************************************************
     print(f"*" * 20)
@@ -215,7 +282,7 @@ if __name__ == "__main__":
         "thermostat.temprature-buffer",
         True,
     )
-    heater.setAIO(thermostat.AIO)
+    heater.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(heater)
 
     # ****************************************************
@@ -231,7 +298,7 @@ if __name__ == "__main__":
         "thermostat.humidity-buffer",
         True,
     )
-    humidifier.setAIO(thermostat.AIO)
+    humidifier.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(humidifier)
 
     # ****************************************************
@@ -247,7 +314,7 @@ if __name__ == "__main__":
         "thermostat.temprature-buffer",
         False,
     )
-    fan.setAIO(thermostat.AIO)
+    fan.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(fan)
 
     # ****************************************************
@@ -256,7 +323,9 @@ if __name__ == "__main__":
 
     thermostat.run()
 
-    app.run(host="0.0.0.0", port="7000", debug=True)
+    thermostat.sendTelegramMessage("Thermostat Started")
+
+    app.run(host="0.0.0.0", port="7000", debug=False)
     # app.run()
 
     # while True:
