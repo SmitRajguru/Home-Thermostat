@@ -162,7 +162,7 @@ class Device:
 
     def status(self):
         print(
-            f"{self.name} : state -> {self.state} | value -> {self.value} | setpoint -> {self.setpoint} | triggerBuffer -> {self.triggerBuffer} | isInvertedControl -> {self.isInvertedControl} | msgTime -> {time.time() - self.msgTime}"
+            f"{self.name} : state -> {self.state} | value -> {self.value} | setpoint -> {self.setpoint} | triggerBuffer -> {self.triggerBuffer} | isInvertedControl -> {self.isInvertedControl} | timeSinceWarning -> {time.time() - self.warningTime}"
         )
 
 
@@ -180,8 +180,8 @@ class Thermostat:
         self.updateTriggerKey = params[secretKeys.IO_UPDATE_TRIGGER_FEED.name]
         self.updateTrigger = params[secretKeys.IO_UPDATE_TRIGGER.name]
 
-        self.msgTime = time.time()
-        self.msgDelay = 60 * 5  # 5 minutes
+        self.warningTime = time.time()
+        self.warningDelay = 60 * 5  # 5 minutes
 
         self.updateThread = threading.Thread(target=self.updateLoop, daemon=True)
 
@@ -210,7 +210,7 @@ class Thermostat:
     def updateLoop(self):
         while True:
             try:
-                if time.time() - self.msgTime > self.msgDelay:
+                if time.time() - self.warningTime > self.warningDelay:
                     self.sendTelegramMessage("Thermostat is Down.")
                 if (
                     self.isUpdate
@@ -224,7 +224,7 @@ class Thermostat:
                     print(f"/" * 20)
                     self.isUpdate = False
                     self.AIO.send_data(self.updateTriggerKey, 0)
-                    self.msgTime = time.time()
+                    self.warningTime = time.time()
             except Exception as e:
                 print(f"Exception in updateLoop : {e}")
                 self.sendTelegramMessage(f"Exception in updateLoop : {e}")
@@ -247,9 +247,9 @@ class Thermostat:
             json[device.name]["setpoint"] = device.setpoint
             json[device.name]["triggerBuffer"] = device.triggerBuffer
             json[device.name]["isInvertedControl"] = device.isInvertedControl
-            json[device.name]["msgTime"] = device.msgTime
-            json[device.name]["msgDelay"] = device.msgDelay
-            json[device.name]["timeSinceMsg"] = time.time() - device.msgTime
+            json[device.name]["warningTime"] = device.warningTime
+            json[device.name]["warningDelay"] = device.warningDelay
+            json[device.name]["timeSinceWarning"] = time.time() - device.warningTime
             json[device.name]["triggerOnURL"] = device.triggerOnURL
             json[device.name]["triggerOffURL"] = device.triggerOffURL
         return json
