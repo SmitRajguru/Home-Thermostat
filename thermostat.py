@@ -14,8 +14,42 @@ app = Flask(__name__)
 
 # define the secrets
 secretKeys = Enum(
-    "secretKeys", ["AIO_Username", "AIO_Key", "Telegram_Bot_Token", "Telegram_Chat_ID"]
+    "secretKeys",
+    [
+        "IO_USERNAME",
+        "IO_KEY",
+        "Telegram_automation_bot_token",
+        "Telegram_automation_chat_id",
+        "Telegram_bot_chat_id",
+        "IO_HUMIDITY_FEED",
+        "IO_HUMIDITY_SETPOINT",
+        "IO_HUMIDITY_BUFFER",
+        "IO_TEMPRATURE_FEED",
+        "IO_TEMPRATURE_SETPOINT",
+        "IO_TEMPRATURE_BUFFER",
+        "IO_TEMPRATURE_FAHRENHEIT_FEED",
+        "IO_HEAT_INDEX_FEED",
+        "IO_HEAT_INDEX_FAHRENHEIT_FEED",
+        "IO_UPDATE_TRIGGER_FEED",
+        "IO_UPDATE_TRIGGER",
+    ],
 )
+
+typeDefs = {}
+typeDefs[secretKeys.IO_USERNAME.name] = str
+typeDefs[secretKeys.IO_KEY.name] = str
+typeDefs[secretKeys.Telegram_automation_bot_token.name] = str
+typeDefs[secretKeys.Telegram_automation_chat_id.name] = int
+# typeDefs[secretKeys.Telegram_bot_chat_id.name] = int
+typeDefs[secretKeys.IO_HUMIDITY_FEED.name] = str
+typeDefs[secretKeys.IO_HUMIDITY_SETPOINT.name] = str
+typeDefs[secretKeys.IO_HUMIDITY_BUFFER.name] = str
+typeDefs[secretKeys.IO_TEMPRATURE_FEED.name] = str
+typeDefs[secretKeys.IO_TEMPRATURE_SETPOINT.name] = str
+typeDefs[secretKeys.IO_TEMPRATURE_BUFFER.name] = str
+
+typeDefs[secretKeys.IO_UPDATE_TRIGGER_FEED.name] = str
+typeDefs[secretKeys.IO_UPDATE_TRIGGER.name] = int
 
 
 class Device:
@@ -27,7 +61,9 @@ class Device:
         valueKey,
         setpointKey,
         triggerBufferKey,
-        isInvertedControl=False,
+        isInvertedControl,
+        warningMultiplier,
+        warningDelay,
     ):
         self.name = name
 
@@ -48,8 +84,9 @@ class Device:
         self.AIO = None
         self.SendMessage = None
 
-        self.msgTime = 0
-        self.msgDelay = 60 * 60  # 2 hours
+        self.warningTime = 0
+        self.warningDelay = warningDelay
+        self.warningMultiplier = warningMultiplier
 
         self.update()
 
@@ -103,23 +140,23 @@ class Device:
                 self.turnOn()
             elif self.value > self.setpoint + self.triggerBuffer:
                 self.turnOff()
-            if self.value < self.setpoint - 2 * self.triggerBuffer:
-                if time.time() - self.msgTime > self.msgDelay:
+            if self.value < self.setpoint - self.warningMultiplier * self.triggerBuffer:
+                if time.time() - self.warningTime > self.warningDelay:
                     self.SendMessage(
                         f"{self.name} is below setpoint by {self.value - self.setpoint}. Check if the device is working properly."
                     )
-                    self.msgTime = time.time()
+                    self.warningTime = time.time()
         else:
             if self.value > self.setpoint + self.triggerBuffer:
                 self.turnOn()
             elif self.value < self.setpoint - self.triggerBuffer:
                 self.turnOff()
-            if self.value > self.setpoint + 2 * self.triggerBuffer:
-                if time.time() - self.msgTime > self.msgDelay:
+            if self.value > self.setpoint + self.warningMultiplier * self.triggerBuffer:
+                if time.time() - self.warningTime > self.warningDelay:
                     self.SendMessage(
                         f"{self.name} is above setpoint by {self.value - self.setpoint}. Check if the device is working properly."
                     )
-                    self.msgTime = time.time()
+                    self.warningTime = time.time()
 
         self.status()
 
@@ -131,25 +168,26 @@ class Device:
 
 class Thermostat:
     def __init__(self, params):
-        self.AIO_USERNAME = params[secretKeys.AIO_Username.name]
-        self.AIO_KEY = params[secretKeys.AIO_Key.name]
+        self.AIO_USERNAME = params[secretKeys.IO_USERNAME.name]
+        self.AIO_KEY = params[secretKeys.IO_KEY.name]
         self.AIO = Client(self.AIO_USERNAME, self.AIO_KEY)
 
-        self.Telegram_Bot_Token = params[secretKeys.Telegram_Bot_Token.name]
-        self.Telegram_Chat_ID = params[secretKeys.Telegram_Chat_ID.name]
-
-        self.feeds = self.AIO.feeds()
-        for f in self.feeds:
-            print(f"Feed found : {f} with value -> {self.AIO.receive(f.key).value}")
+        self.Telegram_Bot_Token = params[secretKeys.Telegram_automation_bot_token.name]
+        self.Telegram_Chat_ID = params[secretKeys.Telegram_automation_chat_id.name]
 
         self.devices = []
         self.isUpdate = True
-        self.updateTriggerKey = "thermostat.update-trigger"
+        self.updateTriggerKey = params[secretKeys.IO_UPDATE_TRIGGER_FEED.name]
+        self.updateTrigger = params[secretKeys.IO_UPDATE_TRIGGER.name]
 
         self.msgTime = time.time()
         self.msgDelay = 60 * 5  # 5 minutes
 
         self.updateThread = threading.Thread(target=self.updateLoop, daemon=True)
+
+        self.feeds = self.AIO.feeds()
+        for f in self.feeds:
+            print(f"Feed found : {f} with value -> {self.AIO.receive(f.key).value}")
 
     def run(self):
         self.updateThread.start()
@@ -176,7 +214,8 @@ class Thermostat:
                     self.sendTelegramMessage("Thermostat is Down.")
                 if (
                     self.isUpdate
-                    or int(float(self.getFeedValue(self.updateTriggerKey))) != 0
+                    or int(float(self.getFeedValue(self.updateTriggerKey)))
+                    == self.updateTrigger
                 ):
                     print(f"*" * 20)
                     print(f"Updating Thermostat")
@@ -244,7 +283,7 @@ if __name__ == "__main__":
                 with open(os.path.join(root, file), "r") as f:
                     file_lines.extend(f.readlines())
 
-    print(f"Secrets file found : {file_lines}")
+    # print(f"Secrets file found : {file_lines}")
 
     # parse the file for the secrets
     params = {}
@@ -254,16 +293,17 @@ if __name__ == "__main__":
             continue
         define = splits[0]
         key = splits[1]
-        value = splits[2]
+        value = splits[2].strip()
+        if '"' in str(value) or "'" in str(value):
+            value = value[1:-1]
         if define == "#define":
-            if key == "IO_USERNAME":
-                params[secretKeys.AIO_Username.name] = value.strip()[1:-1]
-            elif key == "IO_KEY":
-                params[secretKeys.AIO_Key.name] = value.strip()[1:-1]
-            elif key == "Telegram_automation_bot_token":
-                params[secretKeys.Telegram_Bot_Token.name] = value.strip()[1:-1]
-            elif key == "Telegram_automation_chat_id":
-                params[secretKeys.Telegram_Chat_ID.name] = int(value.strip()[1:-1])
+            for defKey in typeDefs:
+                if defKey == key:
+                    print(f"Found secret : {key} -> {value} -> {typeDefs[defKey]}")
+                    if typeDefs[defKey] == type(value):
+                        params[key] = value
+                    else:
+                        params[key] = typeDefs[key](value)
 
     print(f"Secrets parsed : {params}")
 
@@ -274,13 +314,15 @@ if __name__ == "__main__":
     print(f"Adding Heater")
 
     heater = Device(
-        "Heater",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=342d523b-0eb3-4569-b41e-cfa75501a381&token=3b3e350d-9c95-4c44-bc56-3b70bf37110c&response=json",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=25024e42-c804-4e54-a1aa-4a96b5d52c63&token=0bb2c8db-ee00-440b-8f57-58d0c2ea3ad1&response=json",
-        "thermostat.temprature-c",
-        "thermostat.setpoint-temprature",
-        "thermostat.temprature-buffer",
-        True,
+        name="Heater",
+        triggerOnURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=342d523b-0eb3-4569-b41e-cfa75501a381&token=3b3e350d-9c95-4c44-bc56-3b70bf37110c&response=json",
+        triggerOffURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=25024e42-c804-4e54-a1aa-4a96b5d52c63&token=0bb2c8db-ee00-440b-8f57-58d0c2ea3ad1&response=json",
+        valueKey=params[secretKeys.IO_TEMPRATURE_FEED.name],
+        setpointKey=params[secretKeys.IO_TEMPRATURE_SETPOINT.name],
+        triggerBufferKey=params[secretKeys.IO_TEMPRATURE_BUFFER.name],
+        isInvertedControl=True,
+        warningMultiplier=2,
+        warningDelay=60 * 60,
     )
     heater.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(heater)
@@ -290,13 +332,15 @@ if __name__ == "__main__":
     print(f"Adding Humidifier")
 
     humidifier = Device(
-        "Humidifier",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=aee87633-0f8b-4eb9-8c3d-b8b74de27b15&token=f79d10a7-16c5-4c69-8d53-e638bd9e6e51&response=json",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=fa6a2a20-4663-46b8-bff7-15758e676f27&token=f7f83342-b01c-4c57-a7f1-950309f9d6c2&response=json",
-        "thermostat.humidity",
-        "thermostat.setpoint-humidity",
-        "thermostat.humidity-buffer",
-        True,
+        name="Humidifier",
+        triggerOnURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=aee87633-0f8b-4eb9-8c3d-b8b74de27b15&token=f79d10a7-16c5-4c69-8d53-e638bd9e6e51&response=json",
+        triggerOffURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=fa6a2a20-4663-46b8-bff7-15758e676f27&token=f7f83342-b01c-4c57-a7f1-950309f9d6c2&response=json",
+        valueKey=params[secretKeys.IO_HUMIDITY_FEED.name],
+        setpointKey=params[secretKeys.IO_HUMIDITY_SETPOINT.name],
+        triggerBufferKey=params[secretKeys.IO_HUMIDITY_BUFFER.name],
+        isInvertedControl=True,
+        warningMultiplier=2,
+        warningDelay=60 * 60,
     )
     humidifier.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(humidifier)
@@ -306,13 +350,15 @@ if __name__ == "__main__":
     print(f"Adding Fan")
 
     fan = Device(
-        "Fan",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=77420b03-5674-40b5-8829-ea6d0b68c0b0&token=743cdc42-37f1-4b5c-880f-83eeecd28d46&response=json",
-        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=c5e4bfe1-1bb0-48dd-9ea0-6ec5a2110549&token=a9bb3cd6-6085-436d-930e-79f6c4d52c43&response=json",
-        "thermostat.temprature-c",
-        "thermostat.setpoint-temprature",
-        "thermostat.temprature-buffer",
-        False,
+        name="Fan",
+        triggerOnURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=77420b03-5674-40b5-8829-ea6d0b68c0b0&token=743cdc42-37f1-4b5c-880f-83eeecd28d46&response=json",
+        triggerOffURL="https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=c5e4bfe1-1bb0-48dd-9ea0-6ec5a2110549&token=a9bb3cd6-6085-436d-930e-79f6c4d52c43&response=json",
+        valueKey=params[secretKeys.IO_TEMPRATURE_FEED.name],
+        setpointKey=params[secretKeys.IO_TEMPRATURE_SETPOINT.name],
+        triggerBufferKey=params[secretKeys.IO_TEMPRATURE_BUFFER.name],
+        isInvertedControl=False,
+        warningMultiplier=10,
+        warningDelay=60 * 60,
     )
     fan.setup(thermostat.AIO, thermostat.sendTelegramMessage)
     thermostat.addDevice(fan)
