@@ -7,7 +7,7 @@
 
 // variables
 AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
-AdafruitIO_Feed *humidityFeed, *tempratureFeed, *tempFahrenheitFeed, *heatIndexFeed, *heatIndexFahrenheitFeed;
+AdafruitIO_Feed *humidityFeed, *tempratureFeed, *tempFahrenheitFeed, *heatIndexFeed, *heatIndexFahrenheitFeed, *updateTriggerFeed;
 
 /**
  * @brief Initializes the connection to Adafruit IO.
@@ -74,6 +74,7 @@ void IOinitFeeds()
     tempFahrenheitFeed = io.feed(IO_TEMPRATURE_FAHRENHEIT_FEED);
     heatIndexFeed = io.feed(IO_HEAT_INDEX_FEED);
     heatIndexFahrenheitFeed = io.feed(IO_HEAT_INDEX_FAHRENHEIT_FEED);
+    updateTriggerFeed = io.feed(IO_UPDATE_TRIGGER_FEED);
 }
 
 /**
@@ -122,6 +123,9 @@ int IOsendDHTData(float humidity, float temprature, float tempFahrenheit, float 
 
     // Send heat index in Fahrenheit data to Adafruit IO
     IOsendData(heatIndexFahrenheitFeed, heatIndexFahrenheit);
+
+    // Send update trigger data to Adafruit IO
+    IOsendData(updateTriggerFeed, IO_UPDATE_TRIGGER);
 
     return 0;
 }

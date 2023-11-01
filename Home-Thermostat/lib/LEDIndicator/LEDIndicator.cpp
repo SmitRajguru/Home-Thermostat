@@ -89,6 +89,7 @@ void LEDupdate()
                 LEDsetAll(blinkColor);
             else
                 LEDsetAll(CRGB::Black);
+            previousLedMillis = currentMillis;
         }
         // Serial.println("Blink the LED indicator");
     }

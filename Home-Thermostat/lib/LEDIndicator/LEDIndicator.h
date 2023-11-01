@@ -12,7 +12,7 @@
 #define COLOR_ORDER GRB
 #define BRIGHTNESS 20
 #define FadeOutSpeed 5
-#define LED_Blink_MS 100
+#define LED_Blink_MS 500
 
 const CRGB bootColor = CRGB::Blue;
 const CRGB ioNotConnectedColor = CRGB::Red;
