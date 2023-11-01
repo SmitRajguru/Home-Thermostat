@@ -15,6 +15,8 @@ void setup()
     Serial.begin(115200);
     delay(10);
 
+    WiFi.hostname("ESP-thermostat");
+
     // setup LED indicator
     LEDinit();
 

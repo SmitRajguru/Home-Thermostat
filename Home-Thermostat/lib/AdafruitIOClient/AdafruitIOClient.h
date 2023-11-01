@@ -8,8 +8,11 @@
 #define WIFI_SSID "attic"
 #define WIFI_PASS "0147258369"
 
+// #define WIFI_SSID "Fios-165 Niagara F-2G"
+// #define WIFI_PASS "165@niagara"
+
 #define IO_USERNAME "rajgurusmit"
-#define IO_KEY "aio_jYum29vqhurx8e1tltUH0ks5XKuM"
+#define IO_KEY "aio_VjCu139amxdxAYl4Pa50SdyKzFiQ"
 
 #define IO_HUMIDITY_FEED "thermostat.humidity"
 #define IO_TEMPRATURE_FEED "thermostat.temprature-c"

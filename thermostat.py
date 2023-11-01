@@ -3,6 +3,7 @@
 # import libraries
 from Adafruit_IO import Client, Feed, RequestError
 from flask import Flask, request
+import requests
 import time
 import threading
 
@@ -51,9 +52,12 @@ class Device:
 
             # send request to turn on
             print(f"Turning on {self.name}")
-            response = request.urlopen(self.triggerOnURL)
-            print(f"Response from {self.name} : {response.read()}")
-            response.close()
+            # response = request.urlopen(self.triggerOnURL)
+            # print(f"Response from {self.name} : {response.read()}")
+            # response.close()
+
+            x = requests.get(self.triggerOnURL)
+            print(f"Response from {self.name} : {x.status_code} -> {x.text}")
 
     def turnOff(self):
         if self.state:
@@ -61,9 +65,12 @@ class Device:
 
             # send request to turn off
             print(f"Turning off {self.name}")
-            response = request.urlopen(self.triggerOffURL)
-            print(f"Response from {self.name} : {response.read()}")
-            response.close()
+            # response = request.urlopen(self.triggerOffURL)
+            # print(f"Response from {self.name} : {response.read()}")
+            # response.close()
+
+            x = requests.get(self.triggerOffURL)
+            print(f"Response from {self.name} : {x.status_code} -> {x.text}")
 
     def setAIO(self, AIO):
         self.AIO = AIO
@@ -110,7 +117,7 @@ class Device:
 class Thermostat:
     def __init__(self):
         self.AIO_USERNAME = "rajgurusmit"
-        self.AIO_KEY = "aio_ycPO51ltBikU3LALQr7SzXdOEJlY"
+        self.AIO_KEY = "aio_VjCu139amxdxAYl4Pa50SdyKzFiQ"
         self.AIO = Client(self.AIO_USERNAME, self.AIO_KEY)
 
         self.feeds = self.AIO.feeds()
@@ -131,17 +138,19 @@ class Thermostat:
 
     def getFeedValue(self, key):
         for feed in self.feeds:
-            print(f"Feed -> {feed} with key -> {key}")
+            # print(f"Feed -> {feed} with key -> {key}")
             if feed.key == key:
-                print(f"Feed found : {feed}")
-                print(f"with value : {self.AIO.receive(feed.key).value}")
-                print(f"with key : {key}")
-                return self.AIO.receive(feed.key).value
+                val = self.AIO.receive(feed.key).value
+                # print(f"Feed -> {key} has value -> {val}")
+                return val
         return None
 
     def updateLoop(self):
         while True:
-            if self.isUpdate or int(self.getFeedValue(self.updateTriggerKey)) != 0:
+            if (
+                self.isUpdate
+                or int(float(self.getFeedValue(self.updateTriggerKey))) != 0
+            ):
                 print(f"*" * 20)
                 print(f"Updating Thermostat")
                 for device in self.devices:
@@ -153,7 +162,7 @@ class Thermostat:
                 print(f"/" * 20)
                 self.isUpdate = False
                 self.AIO.send_data(self.updateTriggerKey, 0)
-            time.sleep(30)
+            time.sleep(10)
 
     def status(self):
         print(f"*" * 20)
@@ -220,9 +229,26 @@ if __name__ == "__main__":
         "thermostat.humidity",
         "thermostat.setpoint-humidity",
         "thermostat.humidity-buffer",
+        True,
     )
     humidifier.setAIO(thermostat.AIO)
     thermostat.addDevice(humidifier)
+
+    # ****************************************************
+    print(f"*" * 20)
+    print(f"Adding Fan")
+
+    fan = Device(
+        "Fan",
+        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=77420b03-5674-40b5-8829-ea6d0b68c0b0&token=743cdc42-37f1-4b5c-880f-83eeecd28d46&response=json",
+        "https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=c5e4bfe1-1bb0-48dd-9ea0-6ec5a2110549&token=a9bb3cd6-6085-436d-930e-79f6c4d52c43&response=json",
+        "thermostat.temprature-c",
+        "thermostat.setpoint-temprature",
+        "thermostat.temprature-buffer",
+        False,
+    )
+    fan.setAIO(thermostat.AIO)
+    thermostat.addDevice(fan)
 
     # ****************************************************
     print(f"*" * 20)
