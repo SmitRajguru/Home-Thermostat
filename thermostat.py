@@ -321,7 +321,7 @@ if __name__ == "__main__":
         setpointKey=params[secretKeys.IO_TEMPRATURE_SETPOINT.name],
         triggerBufferKey=params[secretKeys.IO_TEMPRATURE_BUFFER.name],
         isInvertedControl=True,
-        warningMultiplier=2,
+        warningMultiplier=10,
         warningDelay=60 * 60,
     )
     heater.setup(thermostat.AIO, thermostat.sendTelegramMessage)
