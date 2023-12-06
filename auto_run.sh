@@ -1,6 +1,6 @@
 # check if a tmux session is already running
-# tmux ls | grep thermostat
-if tmux ls | grep thermostat; then
+tmux_state=$(tmux ls | grep thermostat)
+if [ -n "$tmux_state" ]; then
     echo "Thermostat is already running"
 else
     echo "Starting thermostat"
